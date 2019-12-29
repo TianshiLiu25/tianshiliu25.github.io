@@ -1,0 +1,28 @@
+---
+layout: post
+title:  "Ubuntu18.04编译AOSP"
+date:   2019-12-29 5:39:07 +0800
+categories: android
+---
+# Ubuntu18.04编译AOSP
+
+AOSP (Android Open Source Project) 是Google主导的开源项目。下载完整代码后，可在ubuntu、mac环境上编译。编译得到的镜像可在安卓模拟器或Nexus系列硬件上加载。
+
+## 下载AOSP完整代码
+
+### 安装Repo工具
+
+android  代码
+
+```bash
+mkdir ~/bin
+```
+
+
+
+参考链接：
+
+[AOSP官网](https://source.android.com/setup/build/initializing)
+
+[清华大学AOSP镜像](https://mirror.tuna.tsinghua.edu.cn/help/AOSP/)
+
