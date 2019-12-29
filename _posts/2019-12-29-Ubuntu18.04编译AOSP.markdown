@@ -12,11 +12,105 @@ AOSP (Android Open Source Project) 是Google主导的开源项目。下载完整
 
 ### 安装Repo工具
 
-android  代码
+```bash
+# 创建个人bin目录
+mkdir ~/bin
+echo 'export PATH="/home/tianshi/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+# 下载repo
+curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+chmod a+x ~/bin/repo
+```
+
+### 下载代码
 
 ```bash
-mkdir ~/bin
+# AOSP 完整代码需要67G空间，编译代码需要额外180G空间
+mkdir aosp
+cd aosp
+# 国内用户，从清华镜像源下载代码初始化包，并解压
+wget -c https://mirrors.tuna.tsinghua.edu.cn/aosp-monthly/aosp-latest.tar
+tar xf aosp-latest.tar
+# 代码分支设置为最新Android10最新发布tag
+repo init -u https://aosp.tuna.tsinghua.edu.cn/ -b android-10.0.0_r20
+# 执行同步
+repo sync -j4
 ```
+
+[android tag 列表](https://source.android.com/setup/start/build-numbers#source-code-tags-and-builds)
+
+## 编译
+
+### 搭建编译环境
+
+ 编译环境的搭建可按[官方文档](https://source.android.com/setup/build/initializing) Ubuntu 14.04 执行。
+
+```bash
+# 安装编译依赖
+sudo apt-get install git-core gnupg flex bison gperf build-essential zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc unzip
+# （可选）设置编译output目录，默认为aosp下的output目录
+export OUT_DIR_COMMON_BASE=<path-to-your-out-directory>
+```
+
+## 编译模拟器用的版本
+
+```bash
+# 设置环境
+source build/envsetup.sh
+# 设置编译目标
+lunch aosp_arm-eng
+# 编译
+m
+# 编译完成后加载模拟器
+emulator
+```
+
+[编译目标列表](https://source.android.com/setup/build/running#selecting-device-build)
+
+[官方编译指南](https://source.android.com/setup/build/building)
+
+## 编译Android Studio加载的版本
+
+如需在其他设备上加载编译的安卓版本，需更改编译参数，并将编译的sdk托管到网站
+
+### 编译
+
+```bash
+# 设置环境
+source build/envsetup.sh
+# 设置编译目标
+lunch aosp_arm-eng
+# 设置为编译sdk
+make -j32 sdk sdk_repo
+```
+
+### 创建html共享链接
+
+可使用apache2创建共享链接
+
+[官方文档](https://source.android.com/setup/create/avd)
+
+```bash
+# 安装
+sudo apt-get install apache2
+# 启动服务
+sudo service apache2 start
+# 新建共享路径
+cd /var/www/html
+sudo mkdir share
+# 拷贝需要共享的文件
+sudo cp ~/asop/out/android-sdk_eng.tianshi_linux-x86.zip /var/www/html/share
+sudo cp ~/asop/out/repo-sys-img.xml /var/www/html/share
+# html共享链接
+# http://192.168.50.83/share/android-sdk_eng.tianshi_linux-x86.zip
+# http://192.168.50.83/share/repo-sys-img.xml
+
+# 修改 repo-sys-img.xml
+sudo vi repo-sys-img.xml
+# 修改 <sdk:url> 为android-sdk_eng.tianshi_linux-x86.zip的共享链接
+```
+
+### 将repo-sys-img.xml 添加到Android Studio
 
 
 
@@ -25,4 +119,6 @@ mkdir ~/bin
 [AOSP官网](https://source.android.com/setup/build/initializing)
 
 [清华大学AOSP镜像](https://mirror.tuna.tsinghua.edu.cn/help/AOSP/)
+
+
 
