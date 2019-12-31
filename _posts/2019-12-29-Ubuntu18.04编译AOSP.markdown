@@ -79,16 +79,16 @@ emulator
 # 设置环境
 source build/envsetup.sh
 # 设置编译目标
-lunch aosp_arm-eng
+lunch sdk_phone_x86
 # 设置为编译sdk
 make -j32 sdk sdk_repo
 ```
 
+[官方文档](https://source.android.com/setup/create/avd)
+
 ### 创建html共享链接
 
 可使用apache2创建共享链接
-
-[官方文档](https://source.android.com/setup/create/avd)
 
 ```bash
 # 安装
@@ -112,7 +112,7 @@ sudo vi repo-sys-img.xml
 
 ### 将repo-sys-img.xml 添加到Android Studio
 
-
+暂未调通，待补充
 
 参考链接：
 
