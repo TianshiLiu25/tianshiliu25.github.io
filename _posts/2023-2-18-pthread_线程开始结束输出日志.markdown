@@ -1,0 +1,240 @@
+---
+layout: post
+title:  "C语言在进程开始结束时输出日志"
+date:   2023-2-18 22:01:00 +0800
+categories: C Programming
+---
+# C语言在进程开始结束时输出日志
+
+近期逝水接到了一个需求，要管控供应商代码中的线程创建行为。具体实现方法为封装部分pthread函数，在线程开始和结束时输出日志，通过日志审计判断供应商使用了多少线程，和线程创建的时机，进而管控供应商对线程资源的使用。
+
+## 简单方案
+
+修改比较简单，接口与原版pthread_create相同，调用者在入参中提供了线程启动时的入口函数`start_routine`和参数`arg`。我们将对入口函数的调用封装到我们自己写的入口函数`wrapped_thread_entry`中，在调用前后增加日志输出线程 ID 即可。前述函数指针和参数的传输需要使用堆内存，并在我们的入口函数中释放。
+
+测试代码如下：
+
+```c
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+#define GET_TID() syscall(SYS_gettid)
+
+void *vendor_thread_entry(void *a)
+{
+    // thread code here
+    printf("pthread run\n");
+    return NULL;
+}
+
+typedef void *(*start_routine)(void *);
+typedef struct
+{
+    start_routine start_routine;
+    void *arg;
+} WrappedArgs;
+
+
+void *wrapped_thread_entry(void *a)
+{
+    int tid = GET_TID();
+    printf("thread id %d begin\n", tid);
+    WrappedArgs *wrappedArgs = (WrappedArgs *)a;
+    void * ret = wrappedArgs->start_routine(wrappedArgs->arg);
+    free(a);
+    printf("thread id %d end\n", tid);
+    return ret;
+}
+
+int vendor_pthread_create(pthread_t *restrict thread,
+                          const pthread_attr_t *restrict attr,
+                          void *(*start_routine)(void *),
+                          void *restrict arg)
+{
+    printf("vendor_pthread_create\n");
+    WrappedArgs *wrappedArgs = malloc(sizeof(WrappedArgs));
+    wrappedArgs->start_routine = start_routine;
+    wrappedArgs->arg = arg;
+    return pthread_create(thread, attr, wrapped_thread_entry, wrappedArgs);
+}
+
+int main()
+{
+    printf("main thread begin\n");
+    pthread_t thread;
+    vendor_pthread_create(&thread, NULL, vendor_thread_entry, NULL);
+    pthread_join(thread, NULL);
+    printf("main thread end\n");
+}
+```
+
+执行输出：
+
+```
+main thread begin
+vendor_pthread_create
+thread id 793063 begin
+pthread run
+thread id 793063 end
+main thread end
+```
+
+## 另一种方案
+
+在开发初期，我没有搞明白函数封装的方法，于是参考网上的帖子写了一种用`pthread_key`销毁机制在线程结束时，输出日志的方法。需要使用者在线程入口函数一开始调用我提供的接口，设置 key，相较于上面的封装方案，供应商会感知接口的调用，从这个角度不是一个好的方案。
+
+代码如下：
+
+```c
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+static pthread_key_t thread_end_callback_key;
+
+#define GET_TID() syscall(SYS_gettid)
+
+void thread_end_callback()
+{
+    printf("thread id %d end\n", GET_TID());
+}
+
+void on_thread_begin()
+{
+    printf("thread id %d begin\n", GET_TID());
+    pthread_setspecific(thread_end_callback_key, (void *)1);
+}
+
+void *vendor_thread_entry(void *a)
+{
+    on_thread_begin();
+    // thread code here
+    printf("pthread run\n");
+    return NULL;
+}
+
+int vendor_pthread_create(pthread_t *restrict thread,
+                          const pthread_attr_t *restrict attr,
+                          void *(*start_routine)(void *),
+                          void *restrict arg)
+{
+    printf("vendor_pthread_create\n");
+    return pthread_create(thread, attr, start_routine, arg);
+}
+
+int main()
+{
+    printf("main thread begin\n");
+    pthread_key_create(&thread_end_callback_key, thread_end_callback);
+    pthread_t thread;
+    vendor_pthread_create(&thread, NULL, vendor_thread_entry, NULL);
+    pthread_join(thread, NULL);
+    pthread_key_delete(thread_end_callback_key);
+    printf("main thread end\n");
+}
+```
+
+## 最终方案
+
+不知道各位看官有没有发现最上面的简单方案的问题呢？那就是如果供应商不是通过 return 而是pthread_exit结束线程的话，我们在接口调用后加的日志并不会被打印。
+
+演示代码：（简单方案更改下用户函数即可）
+
+```c
+void *vendor_thread_entry(void *a)
+{
+    // thread code here
+    printf("pthread run\n");
+    pthread_exit(NULL); // exit
+    return NULL;
+}
+```
+
+执行输出：
+
+```bash
+main thread begin
+vendor_pthread_create
+thread id 3214850 begin
+# 本应有的线程退出时的日志没啦！！！！
+pthread run
+main thread end
+```
+
+唉，Stackoverflow 诚不我欺，大佬回答要用pthread_key是有原因的啊。于是当前认知下的最终方案登场：
+
+```c
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+#define GET_TID() syscall(SYS_gettid)
+static pthread_key_t thread_end_callback_key; // 修改都是与这个key 关联的
+
+void *vendor_thread_entry(void *a)
+{
+    // thread code here
+    printf("pthread run\n");
+    pthread_exit(NULL);
+    return NULL;
+}
+
+void thread_end_callback()
+{
+    printf("thread id %d end\n", GET_TID());
+}
+
+typedef void *(*start_routine)(void *);
+typedef struct
+{
+    start_routine start_routine;
+    void *arg;
+} WrappedArgs;
+
+
+void *wrapped_thread_entry(void *a)
+{
+    int tid = GET_TID();
+    printf("thread id %d begin\n", tid);
+    pthread_setspecific(thread_end_callback_key, (void *)1);
+    WrappedArgs *wrappedArgs = (WrappedArgs *)a;
+    void * ret = wrappedArgs->start_routine(wrappedArgs->arg);
+    free(a);
+    printf("thread id %d end\n", tid);
+    return ret;
+}
+
+int vendor_pthread_create(pthread_t *restrict thread,
+                          const pthread_attr_t *restrict attr,
+                          void *(*start_routine)(void *),
+                          void *restrict arg)
+{
+    printf("vendor_pthread_create\n");
+    WrappedArgs *wrappedArgs = malloc(sizeof(WrappedArgs));
+    wrappedArgs->start_routine = start_routine;
+    wrappedArgs->arg = arg;
+    return pthread_create(thread, attr, wrapped_thread_entry, wrappedArgs);
+}
+
+int main()
+{
+    printf("main thread begin\n");
+    pthread_t thread;
+    pthread_key_create(&thread_end_callback_key, thread_end_callback);
+    vendor_pthread_create(&thread, NULL, vendor_thread_entry, NULL);
+    pthread_join(thread, NULL);
+    pthread_key_delete(thread_end_callback_key);
+    printf("main thread end\n");
+}
+```
+
+## 参考链接
+
+https://stackoverflow.com/questions/10390738/calling-a-function-when-thread-is-exiting-in-pthreads-or-windows
